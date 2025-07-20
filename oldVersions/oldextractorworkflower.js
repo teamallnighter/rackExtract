@@ -59,12 +59,12 @@ function extract_workflow_internal(trackID, deviceID) {
             return;
         }
 
-        // Get root device info - unwrap arrays from LiveAPI
+        // Get root device info
         var rootDeviceName = get_safe_name(deviceAPI);
         var deviceType = get_device_type(deviceAPI);
-        var deviceClass = unwrap_array(deviceAPI.get("class_name"));
-        var visibleMacros = unwrap_array(deviceAPI.get("visible_macro_count"));
-        var variationCount = unwrap_array(deviceAPI.get("variation_count"));
+        var deviceClass = deviceAPI.get("class_name");
+        var visibleMacros = deviceAPI.get("visible_macro_count");
+        var variationCount = deviceAPI.get("variation_count");
 
         post("Found root device: " + rootDeviceName + " (class: " + deviceClass + ")\n");
         post("Device type: " + deviceType + ", macros: " + visibleMacros + ", variations: " + variationCount + "\n");
@@ -212,24 +212,28 @@ function extract_device_parameters(api) {
             try {
                 paramAPI.path = paramPath;
 
-                // Get parameter properties directly - unwrap arrays returned by LiveAPI
-                var paramName = unwrap_array(paramAPI.get("name"));
-                var paramValue = unwrap_array(paramAPI.get("value"));
-                var paramDisplayValue = unwrap_array(paramAPI.get("display_value"));
-                var paramDefaultValue = unwrap_array(paramAPI.get("default_value"));
-                var paramMin = unwrap_array(paramAPI.get("min"));
-                var paramMax = unwrap_array(paramAPI.get("max"));
-                var paramQuantized = unwrap_array(paramAPI.get("is_quantized"));
+                // Get parameter properties directly
+                var paramName = paramAPI.get("name");
+                var paramValue = paramAPI.get("value");
+                var paramDisplayValue = paramAPI.get("display_value");
+                var paramDefaultValue = paramAPI.get("default_value");
+                var paramMin = paramAPI.get("min");
+                var paramMax = paramAPI.get("max");
+                var paramQuantized = paramAPI.get("is_quantized");
 
-                // Only skip parameters with corrupted ESSENTIAL properties (name or value)
+                // Filter out corrupted parameters - ANY 5e-324 value means skip this parameter
                 var isCorrupted = is_5e324_value(paramName) ||
                     is_5e324_value(paramValue) ||
+                    is_5e324_value(paramDisplayValue) ||
+                    is_5e324_value(paramDefaultValue) ||
+                    is_5e324_value(paramMin) ||
+                    is_5e324_value(paramMax) ||
                     paramName === null ||
                     paramName === undefined ||
                     paramName === "" ||
                     paramName === "unnamed";
 
-                // Include parameters with valid name and value (other properties can be null/missing)
+                // ONLY include parameters with valid, non-corrupted values
                 if (!isCorrupted && paramName) {
                     var paramInfo = {
                         parameter_id: i,
@@ -242,8 +246,8 @@ function extract_device_parameters(api) {
                         is_quantized: paramQuantized
                     };
 
-                    // Clean any remaining 5e-324 values from non-essential properties
-                    paramInfo = clean_parameter_5e324(paramInfo);
+                    // Final filter of the parameter object itself
+                    paramInfo = filter_object_5e324(paramInfo);
 
                     parameters.push(paramInfo);
                     post("      Param " + i + ": " + paramName + " = " + paramValue + " (display: " + paramDisplayValue + ")\n");
@@ -265,39 +269,6 @@ function extract_device_parameters(api) {
 
 /////////////////////////////////////////
 // UTILITY FUNCTIONS (adapted from chooser)
-
-// Unwrap single-element arrays returned by LiveAPI
-function unwrap_array(value) {
-    if (Array.isArray(value) && value.length === 1) {
-        return value[0];
-    }
-    return value;
-}
-
-// Clean parameter object, allowing null values for non-essential properties
-function clean_parameter_5e324(paramInfo) {
-    var cleaned = {};
-
-    for (var key in paramInfo) {
-        if (paramInfo.hasOwnProperty(key)) {
-            var value = paramInfo[key];
-
-            // For essential properties (name, value), keep as is if not corrupted
-            if (key === "name" || key === "value" || key === "parameter_id") {
-                cleaned[key] = value;
-            }
-            // For optional properties, set to null if corrupted, otherwise keep
-            else if (is_5e324_value(value)) {
-                cleaned[key] = null;
-            }
-            else {
-                cleaned[key] = value;
-            }
-        }
-    }
-
-    return cleaned;
-}
 
 // Check if a value is the corrupted 5e-324 indicator
 function is_5e324_value(value) {

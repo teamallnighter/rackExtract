@@ -1,8 +1,3 @@
-// Rack Workflow Extractor for AI Training Data
-// Based on M4L.chooser.js by Jeremy Bernstein (Cycling '74)
-// Adapted for recursive device chain extraction and JSON export
-// Single M4L JavaScript file - no Node.js or V8 communication needed
-
 autowatch = 1;
 inlets = 1;
 outlets = 1;
