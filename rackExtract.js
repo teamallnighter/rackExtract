@@ -1,11 +1,18 @@
-// Rack Workflow Extractor for AI Training Data
-// Based on M4L.chooser.js by Jeremy Bernstein (Cycling '74)
-// Adapted for recursive device chain extraction and JSON export
-// Single M4L JavaScript file - no Node.js or V8 communication needed
+//
+//  rackExtract.js
+//  rackExtract
+//
+//  Created by BassDaddy on 07/20/2025
+//
+// Use this script to extract workflows from Abletin Live racks.
+
 
 autowatch = 1;
 inlets = 1;
 outlets = 1;
+
+// n8n Integration Configuration
+var N8N_WEBHOOK_URL = "http://localhost:5678/webhook-test/rack-data";
 
 // Workflow extraction types - simplified from chooser MenuTypes
 var WorkflowTypes = {
@@ -396,12 +403,75 @@ function dequote(string) {
     return string.replace(/\"/g, "");
 }
 
-// Export workflow data as JSON
+/////////////////////////////////////////
+// n8n INTEGRATION FUNCTIONS
+
+// Simple HTTP function for Max for Live
+function send_to_n8n_server(workflowData) {
+    try {
+        post("=== SENDING TO N8N SERVER ===\n");
+        post("URL: " + N8N_WEBHOOK_URL + "\n");
+
+        var jsonString = JSON.stringify(workflowData, null, 2);
+        post("Payload size: " + jsonString.length + " characters\n");
+
+        var httpMethod = new XMLHttpRequest();
+        post("Using XMLHttpRequest method\n");
+
+        httpMethod.onreadystatechange = function () {
+            if (httpMethod.readyState === 4) {
+                var status = httpMethod.status || 0;
+                var responseText = httpMethod.responseText || "";
+
+                post("🔄 HTTP Response received - Status: " + status + "\n");
+
+                if (status === 200) {
+                    post("✅ SUCCESS: Data sent to n8n server\n");
+                    post("Raw response: " + responseText + "\n");
+
+                    try {
+                        var response = JSON.parse(responseText);
+
+                        if (response.status === "success") {
+                            post("🎉 === AI ANALYSIS COMPLETE ===\n");
+                            post("🎵 Rack Name: " + (response.rack_name || "Unknown") + "\n");
+                            post("🔧 Device Count: " + (response.device_count || "Unknown") + "\n");
+                            post("⚡ Complexity: " + (response.complexity_score || "Unknown") + "/100\n");
+                            post("🎯 Use Case: " + (response.primary_use_case || "Unknown") + "\n");
+
+                            if (response.tags && response.tags.length > 0) {
+                                post("🏷️ Tags: " + response.tags.join(", ") + "\n");
+                            }
+
+                            post("✨ Processing completed at: " + (response.processed_at || "Unknown") + "\n");
+                        } else {
+                            post("⚠️ Workflow triggered but not completed\n");
+                            post("💡 Check n8n executions tab for results\n");
+                        }
+                    } catch (parseError) {
+                        post("⚠️ Response received but couldn't parse JSON: " + parseError + "\n");
+                    }
+                } else {
+                    post("❌ ERROR: HTTP " + status + "\n");
+                    post("Response: " + responseText + "\n");
+                }
+            }
+        };
+
+        httpMethod.open("POST", N8N_WEBHOOK_URL, true);
+        httpMethod.setRequestHeader("Content-Type", "application/json");
+        httpMethod.send(jsonString);
+
+    } catch (error) {
+        post("ERROR in send_to_n8n_server: " + error + "\n");
+    }
+}
+
+// Export workflow data as JSON (UPDATED with n8n integration)
 function export_workflow_json() {
     try {
         post("=== WORKFLOW EXTRACTION COMPLETE ===\n");
 
-        // Handle both device and chain extractions
         var rootName = "unknown";
         if (WorkflowData.workflow.root_device) {
             rootName = WorkflowData.workflow.root_device.name;
@@ -414,13 +484,15 @@ function export_workflow_json() {
         post("Total devices found: " + WorkflowData.workflow.devices.length + "\n");
         post("Total chains found: " + WorkflowData.workflow.chains.length + "\n");
 
-        // Output JSON via outlet
         var jsonString = JSON.stringify(WorkflowData, null, 2);
         outlet(0, "workflow_json", jsonString);
 
-        // Also post abbreviated version to Max window
         post("JSON Export (first 500 chars):\n");
         post(jsonString.substring(0, 500) + "...\n");
+
+        // NEW: Send to n8n server automatically
+        post("\n🚀 SENDING TO AI ANALYSIS SERVER...\n");
+        send_to_n8n_server(WorkflowData);
 
     } catch (error) {
         post("ERROR in export_workflow_json: " + error + "\n");
@@ -482,124 +554,24 @@ function WorkflowAPIMenu(type, path) {
 // FILTER FUNCTIONS (simplified from chooser)
 
 function extract_device_workflow(api) {
-    // This replaces the menu-building filter with data extraction
     return true;
 }
 
 function extract_chain_workflow(api) {
-    // This replaces the menu-building filter with data extraction  
     return true;
 }
 
 /////////////////////////////////////////
 // USER INTERFACE
 
-// Extract from specific chain path (like extract_workflow 1 0 0)
-function extract_chain(trackID, deviceID, chainID) {
-    post("=== EXTRACTING FROM CHAIN ===\n");
-    post("Extracting from track " + trackID + ", device " + deviceID + ", chain " + chainID + "\n");
-
-    try {
-        // Build path to target chain
-        var chainPath = Root + " tracks " + trackID + " devices " + deviceID + " chains " + chainID;
-        post("Target chain path: " + chainPath + "\n");
-
-        // Initialize workflow data structure
-        WorkflowData = {
-            metadata: {
-                extracted_at: new Date().toISOString(),
-                track_id: trackID,
-                device_id: deviceID,
-                chain_id: chainID,
-                extractor_version: "1.0"
-            },
-            workflow: {
-                root_chain: null,
-                devices: [],
-                chains: [],
-                parameters: [],
-                connections: []
-            }
-        };
-
-        // Create API for target chain
-        var chainAPI = new WorkflowAPIMenu(WorkflowTypes.chain, chainPath);
-        if (!chainAPI) {
-            post("ERROR: Could not access chain at " + chainPath + "\n");
-            return;
-        }
-
-        // Get chain info
-        chainAPI.path = chainPath;
-        var chainName = get_safe_name(chainAPI) || ("Chain " + chainID);
-        post("Found chain: " + chainName + "\n");
-
-        WorkflowData.workflow.root_chain = {
-            chain_id: chainID,
-            name: chainName,
-            path: chainPath,
-            devices: []
-        };
-
-        // Extract devices in this chain
-        var deviceCount = chainAPI.getcount("devices");
-        post("Chain has " + deviceCount + " devices\n");
-
-        for (var i = 0; i < deviceCount; i++) {
-            var devicePath = chainPath + " devices " + i;
-            chainAPI.path = devicePath;
-
-            var deviceName = get_safe_name(chainAPI);
-            post("- Device " + i + ": " + deviceName + "\n");
-
-            var deviceInfo = {
-                device_id: i,
-                name: deviceName,
-                path: devicePath,
-                type: get_device_type(chainAPI),
-                parameters: extract_device_parameters(chainAPI)
-            };
-
-            // Filter out any 5e-324 values from device info
-            deviceInfo = filter_object_5e324(deviceInfo);
-
-            WorkflowData.workflow.root_chain.devices.push(deviceInfo);
-            WorkflowData.workflow.devices.push(deviceInfo);
-
-            // Check for nested chains
-            var children = chainAPI.children;
-            if (children && children.join(" ").match(/\s+?chains\s+/)) {
-                post("  Device has nested chains - extracting...\n");
-                extract_recursive_chains(chainAPI, devicePath, 1);
-            }
-        }
-
-        // Export workflow as JSON
-        export_workflow_json();
-
-    } catch (error) {
-        post("ERROR in extract_chain: " + error + "\n");
-    }
-}
-
 // Main function - extract workflow from Metal Head device
 function extract_metal_head() {
-    extract_workflow_internal(1, 0);  // trackID:1, deviceID:0 for "Metal Head"
-}
-
-// Main function - extract first chain from Metal Head device  
-function extract_metal_head_chain() {
-    extract_chain(1, 0, 0);  // trackID:1, deviceID:0, chainID:0 for first chain
+    extract_workflow_internal(1, 0);
 }
 
 // Main function - extract EZFREQSPLIT device (simpler test case)
 function extract_ezfreqsplit() {
-    extract_workflow_internal(1, 1);  // trackID:1, deviceID:1 for "EZFREQSPLIT"
-}
-
-// Extract first chain from EZFREQSPLIT (should be LOWS-CHAIN)
-function extract_ezfreqsplit_chain() {
-    extract_chain(1, 1, 0);  // trackID:1, deviceID:1, chainID:0
+    extract_workflow_internal(1, 1);
 }
 
 // Generic extraction function
@@ -612,58 +584,59 @@ function extract(trackID, deviceID) {
     extract_workflow_internal(trackID, deviceID);
 }
 
-// Alternative function names for easier typing
-function extract_metalhead() {
-    extract_metal_head();
-}
-
 function extract_workflow() {
     if (arguments.length < 2) {
         post("ERROR: extract_workflow requires trackID and deviceID arguments\n");
         post("Usage: extract_workflow(trackID, deviceID) - Extract device\n");
-        post("Usage: extract_workflow(trackID, deviceID, chainID) - Extract specific chain\n");
-        post("Example: extract_workflow(1, 0) - Extract Metal Head device\n");
-        post("Example: extract_workflow(1, 0, 0) - Extract first chain in Metal Head\n");
+        post("Example: extract_workflow(1, 0) - Extract device\n");
         return;
     }
 
     var trackID = arguments[0];
     var deviceID = arguments[1];
-
-    // Check if third argument provided (chainID)
-    if (arguments.length >= 3) {
-        var chainID = arguments[2];
-        extract_chain(trackID, deviceID, chainID);
-        return;
-    }
-
-    // Otherwise extract device
     extract_workflow_internal(trackID, deviceID);
 }
 
 // Test function
 function test() {
-    post("Rack Workflow Extractor loaded and ready!\n");
+    post("🎵 Rack Workflow Extractor with AI Integration loaded!\n");
+    post("Server: " + N8N_WEBHOOK_URL + "\n");
     post("Commands:\n");
-    post("  extract_metal_head() - Extract Metal Head device overview\n");
-    post("  extract_metal_head_chain() - Extract first chain in Metal Head\n");
-    post("  extract_ezfreqsplit() - Extract EZFREQSPLIT device (better test)\n");
-    post("  extract_ezfreqsplit_chain() - Extract first chain in EZFREQSPLIT\n");
-    post("  extract_metalhead() - Same as extract_metal_head()\n");
-    post("  extract(trackID, deviceID) - Extract any device workflow\n");
-    post("  extract_workflow(trackID, deviceID) - Extract device\n");
-    post("  extract_workflow(trackID, deviceID, chainID) - Extract specific chain\n");
-    post("  extract_chain(trackID, deviceID, chainID) - Extract chain directly\n");
+    post("  extract_metal_head() - Extract Metal Head device\n");
+    post("  extract_ezfreqsplit() - Extract EZFREQSPLIT device\n");
+    post("  extract_workflow(trackID, deviceID) - Extract any device\n");
     post("  test() - Show this message\n");
-    post("\n");
-    post("Examples:\n");
-    post("  extract_workflow(1, 0) - Extract Metal Head device\n");
-    post("  extract_workflow(1, 1) - Extract EZFREQSPLIT device\n");
-    post("  extract_workflow(1, 1, 0) - Extract LOWS-CHAIN from EZFREQSPLIT\n");
+    post("\nExamples:\n");
+    post("  extract_workflow(1, 0) - Extract device on track 1, slot 0\n");
+    post("\n🔧 All extractions automatically send to AI server!\n");
+}
+
+// Test n8n connection
+function test_n8n_connection() {
+    post("🧪 Testing n8n connection...\n");
+
+    var testData = {
+        metadata: {
+            extracted_at: new Date().toISOString(),
+            track_id: 999,
+            device_id: 999,
+            extractor_version: "1.0"
+        },
+        workflow: {
+            root_device: {
+                name: "Test Rack",
+                type: "test"
+            },
+            devices: [],
+            chains: []
+        }
+    };
+
+    send_to_n8n_server(testData);
 }
 
 // Initialize on load
 function loadbang() {
-    post("Rack Workflow Extractor v1.0 loaded\n");
+    post("🎵 Rack Workflow Extractor v2.0 with AI Integration loaded\n");
     test();
 }
