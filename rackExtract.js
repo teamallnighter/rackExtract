@@ -14,6 +14,14 @@ outlets = 1;
 // n8n Integration Configuration
 var N8N_WEBHOOK_URL = "http://localhost:5678/webhook-test/rack-data";
 
+// Modular Configuration - Controls server integration behavior
+var ExtractorConfig = {
+    auto_send_to_server: false,  // Don't automatically send to server
+    server_enabled: true,        // Allow manual server operations
+    offline_mode: false,         // Force offline-only operation
+    debug_server: false          // Extra server debugging
+};
+
 // Workflow extraction types - simplified from chooser MenuTypes
 var WorkflowTypes = {
     device: { container: ["devices"], filterfun: extract_device_workflow },
@@ -30,6 +38,86 @@ var TempRecursiveAPI = new Array();
 var TempRecursiveAPILevel = 0;
 
 /////////////////////////////////////////
+// ENVIRONMENT VALIDATION FUNCTIONS
+
+// Check if we're in a proper Max for Live environment
+function validate_max_environment() {
+    try {
+        post("🔍 Validating Max for Live environment...\n");
+
+        // Test basic LiveAPI functionality
+        var testAPI = new LiveAPI();
+        if (!testAPI) {
+            post("❌ ERROR: LiveAPI not available - not in Max for Live?\n");
+            return false;
+        }
+
+        // Test if we can access live_set
+        try {
+            testAPI.path = "live_set";
+            var name = testAPI.get("name");
+            post("✅ Live Set accessible: " + (name || "Untitled") + "\n");
+        } catch (liveSetError) {
+            post("❌ ERROR: Cannot access live_set: " + liveSetError + "\n");
+            return false;
+        }
+
+        // Test track access
+        try {
+            testAPI.path = "live_set tracks 0";
+            var trackName = testAPI.get("name");
+            post("✅ Track 0 accessible: " + (trackName || "Unnamed") + "\n");
+        } catch (trackError) {
+            post("⚠️ WARNING: Track 0 not accessible: " + trackError + "\n");
+            post("   Make sure you have at least one track in your Live set\n");
+        }
+
+        post("✅ Max for Live environment validated\n");
+        return true;
+    } catch (error) {
+        post("❌ CRITICAL ERROR: Max environment validation failed: " + error + "\n");
+        return false;
+    }
+}
+
+// Validate that a specific track and device exist
+function validate_track_device_path(trackID, deviceID) {
+    try {
+        post("🔍 Validating track " + trackID + ", device " + deviceID + "...\n");
+
+        var trackPath = "live_set tracks " + trackID;
+        var devicePath = trackPath + " devices " + deviceID;
+
+        // Check track exists
+        var trackAPI = new LiveAPI();
+        trackAPI.path = trackPath;
+        try {
+            var trackName = trackAPI.get("name");
+            post("✅ Track " + trackID + " found: " + (trackName || "Unnamed") + "\n");
+        } catch (trackError) {
+            post("❌ ERROR: Track " + trackID + " does not exist: " + trackError + "\n");
+            return false;
+        }
+
+        // Check device exists
+        var deviceAPI = new LiveAPI();
+        deviceAPI.path = devicePath;
+        try {
+            var deviceName = deviceAPI.get("name");
+            post("✅ Device " + deviceID + " found: " + (deviceName || "Unnamed") + "\n");
+            return true;
+        } catch (deviceError) {
+            post("❌ ERROR: Device " + deviceID + " on track " + trackID + " does not exist: " + deviceError + "\n");
+            return false;
+        }
+
+    } catch (error) {
+        post("❌ ERROR in validate_track_device_path: " + error + "\n");
+        return false;
+    }
+}
+
+/////////////////////////////////////////
 // MAIN WORKFLOW EXTRACTION FUNCTIONS
 
 // Extract workflow from specific track and device
@@ -38,6 +126,18 @@ function extract_workflow_internal(trackID, deviceID) {
     post("Extracting workflow from track " + trackID + ", device " + deviceID + "\n");
 
     try {
+        // Step 1: Validate Max for Live environment
+        if (!validate_max_environment()) {
+            post("❌ ABORTING: Max for Live environment validation failed\n");
+            return;
+        }
+
+        // Step 2: Validate track and device exist
+        if (!validate_track_device_path(trackID, deviceID)) {
+            post("❌ ABORTING: Track/device validation failed\n");
+            return;
+        }
+
         // Build path to target device
         var devicePath = Root + " tracks " + trackID + " devices " + deviceID;
         post("Target device path: " + devicePath + "\n");
@@ -48,12 +148,10 @@ function extract_workflow_internal(trackID, deviceID) {
                 extracted_at: new Date().toISOString(),
                 track_id: trackID,
                 device_id: deviceID,
-                extractor_version: "1.0"
+                extractor_version: "2.0"
             },
             workflow: {
                 root_device: null,
-                devices: [],
-                chains: [],
                 parameters: [],
                 connections: []
             }
@@ -69,9 +167,9 @@ function extract_workflow_internal(trackID, deviceID) {
         // Get root device info - unwrap arrays from LiveAPI
         var rootDeviceName = get_safe_name(deviceAPI);
         var deviceType = get_device_type(deviceAPI);
-        var deviceClass = unwrap_array(deviceAPI.get("class_name"));
-        var visibleMacros = unwrap_array(deviceAPI.get("visible_macro_count"));
-        var variationCount = unwrap_array(deviceAPI.get("variation_count"));
+        var deviceClass = get_safe_property(deviceAPI, "class_name");
+        var visibleMacros = get_safe_property(deviceAPI, "visible_macro_count");
+        var variationCount = get_safe_property(deviceAPI, "variation_count");
 
         post("Found root device: " + rootDeviceName + " (class: " + deviceClass + ")\n");
         post("Device type: " + deviceType + ", macros: " + visibleMacros + ", variations: " + variationCount + "\n");
@@ -84,7 +182,8 @@ function extract_workflow_internal(trackID, deviceID) {
             class_name: filter_5e324_value(deviceClass),
             visible_macro_count: filter_5e324_value(visibleMacros),
             variation_count: filter_5e324_value(variationCount),
-            macros: extract_device_parameters(deviceAPI)  // Root device params are MACROS
+            macros: extract_device_parameters(deviceAPI),  // Root device params are MACROS
+            chains: []  // Initialize chains array for root device
         };
 
         // Remove any properties with 5e-324 values
@@ -94,7 +193,7 @@ function extract_workflow_internal(trackID, deviceID) {
         var children = deviceAPI.children;
         if (children && children.join(" ").match(/\s+?chains\s+/)) {
             post("Device has chains - extracting recursive workflow...\n");
-            extract_recursive_chains(deviceAPI, devicePath, 0);
+            extract_recursive_chains(deviceAPI, devicePath, 0, WorkflowData.workflow.root_device);
         } else {
             post("Device has no chains - simple device workflow\n");
         }
@@ -108,7 +207,7 @@ function extract_workflow_internal(trackID, deviceID) {
 }
 
 // Recursively extract all chains and nested devices
-function extract_recursive_chains(api, basePath, depth) {
+function extract_recursive_chains(api, basePath, depth, parentContainer) {
     try {
         var target = dequote(basePath);
         var spacing = "";
@@ -140,7 +239,8 @@ function extract_recursive_chains(api, basePath, depth) {
             // Extract devices in this chain
             extract_chain_devices(chainsAPI, chainPath, chainInfo, depth + 1);
 
-            WorkflowData.workflow.chains.push(chainInfo);
+            // Add chain to the parent container (root_device or nested device)
+            parentContainer.chains.push(chainInfo);
         }
 
         RecursiveWorkflowAPIDispose(chainsAPI);
@@ -175,20 +275,24 @@ function extract_chain_devices(api, chainPath, chainInfo, depth) {
                 path: devicePath,
                 depth: depth,
                 type: get_device_type(api),
-                parameters: extract_device_parameters(api)
+                parameters: extract_device_parameters(api),
+                chains: []  // Initialize chains array for potential nested chains
             };
 
             // Filter out any 5e-324 values from device info
             deviceInfo = filter_object_5e324(deviceInfo);
 
+            // Add device to its parent chain
             chainInfo.devices.push(deviceInfo);
-            WorkflowData.workflow.devices.push(deviceInfo);
 
             // Check if this device also has chains (nested racks)
             var children = api.children;
             if (children && children.join(" ").match(/\s+?chains\s+/)) {
                 post(spacing + "  Nested rack detected - going deeper...\n");
-                extract_recursive_chains(api, devicePath, depth + 1);
+                extract_recursive_chains(api, devicePath, depth + 1, deviceInfo);
+            } else {
+                // If device has no chains, remove the empty chains array to keep JSON clean
+                delete deviceInfo.chains;
             }
         }
 
@@ -386,6 +490,17 @@ function get_safe_name(api) {
     }
 }
 
+// Safe property getter that handles LiveAPI errors gracefully
+function get_safe_property(api, propertyName) {
+    try {
+        var value = api.get(propertyName);
+        return unwrap_array(value);
+    } catch (error) {
+        post("WARNING: Could not get property '" + propertyName + "': " + error + "\n");
+        return null;
+    }
+}
+
 function get_device_type(api) {
     try {
         // Try to determine device type
@@ -404,7 +519,51 @@ function dequote(string) {
 }
 
 /////////////////////////////////////////
-// n8n INTEGRATION FUNCTIONS
+// MODULAR SERVER INTEGRATION (separated from core extraction)
+
+// Check if server is available before attempting connection
+function check_server_health() {
+    if (ExtractorConfig.offline_mode) {
+        post("ℹ️ Offline mode enabled - server operations disabled\n");
+        return false;
+    }
+
+    if (!ExtractorConfig.server_enabled) {
+        post("ℹ️ Server integration disabled in configuration\n");
+        return false;
+    }
+
+    post("🔍 Checking server health at " + N8N_WEBHOOK_URL + "...\n");
+    return true;  // TODO: Add actual health check ping
+}
+
+// Send current WorkflowData to AI server (modular function)
+function send_to_ai_server() {
+    if (!WorkflowData) {
+        post("❌ No workflow data to send - extract a rack first\n");
+        return;
+    }
+
+    if (!check_server_health()) {
+        post("⚠️ Server not available - extraction data preserved locally\n");
+        return;
+    }
+
+    post("🚀 SENDING TO AI ANALYSIS SERVER...\n");
+    send_to_n8n_server(WorkflowData);
+}
+
+// Send last extracted data to server (for retry scenarios)
+function retry_ai_analysis() {
+    if (!WorkflowData) {
+        post("❌ No previous extraction data found\n");
+        post("💡 Extract a rack first, then use retry_ai_analysis()\n");
+        return;
+    }
+
+    post("🔄 Retrying AI analysis with last extracted data...\n");
+    send_to_ai_server();
+}
 
 // Simple HTTP function for Max for Live
 function send_to_n8n_server(workflowData) {
@@ -454,6 +613,7 @@ function send_to_n8n_server(workflowData) {
                 } else {
                     post("❌ ERROR: HTTP " + status + "\n");
                     post("Response: " + responseText + "\n");
+                    post("💡 Tip: Use retry_ai_analysis() to try again later\n");
                 }
             }
         };
@@ -464,25 +624,69 @@ function send_to_n8n_server(workflowData) {
 
     } catch (error) {
         post("ERROR in send_to_n8n_server: " + error + "\n");
+        post("💡 Extraction data preserved - use retry_ai_analysis() when server is back\n");
     }
 }
 
-// Export workflow data as JSON (UPDATED with n8n integration)
+/////////////////////////////////////////
+// CONFIGURATION FUNCTIONS
+
+// Set configuration options
+function set_config(key, value) {
+    if (ExtractorConfig.hasOwnProperty(key)) {
+        var oldValue = ExtractorConfig[key];
+        ExtractorConfig[key] = value;
+        post("⚙️ Configuration updated: " + key + " = " + value + " (was: " + oldValue + ")\n");
+    } else {
+        post("❌ Unknown configuration key: " + key + "\n");
+        show_config();
+    }
+}
+
+// Show current configuration
+function show_config() {
+    post("⚙️ === EXTRACTOR CONFIGURATION ===\n");
+    for (var key in ExtractorConfig) {
+        if (ExtractorConfig.hasOwnProperty(key)) {
+            post("  " + key + ": " + ExtractorConfig[key] + "\n");
+        }
+    }
+    post("💡 Use set_config(key, value) to change settings\n");
+}
+
+// Enable offline mode (disables all server operations)
+function enable_offline_mode() {
+    set_config('offline_mode', true);
+    post("🔌 Offline mode enabled - extraction will work without server\n");
+}
+
+// Enable auto-send to server after extraction
+function enable_auto_analysis() {
+    set_config('auto_send_to_server', true);
+    post("🤖 Auto AI analysis enabled - extractions will automatically send to server\n");
+}
+
+// Export workflow data as JSON (PURE EXTRACTION - no server dependencies)
 function export_workflow_json() {
     try {
         post("=== WORKFLOW EXTRACTION COMPLETE ===\n");
 
         var rootName = "unknown";
+        var totalDeviceCount = 0;
+        var totalChainCount = 0;
+
         if (WorkflowData.workflow.root_device) {
             rootName = WorkflowData.workflow.root_device.name;
             post("Root device: " + rootName + "\n");
-        } else if (WorkflowData.workflow.root_chain) {
-            rootName = WorkflowData.workflow.root_chain.name;
-            post("Root chain: " + rootName + "\n");
+
+            // Count devices and chains recursively
+            var counts = count_devices_and_chains_recursive(WorkflowData.workflow.root_device);
+            totalDeviceCount = counts.devices;
+            totalChainCount = counts.chains;
         }
 
-        post("Total devices found: " + WorkflowData.workflow.devices.length + "\n");
-        post("Total chains found: " + WorkflowData.workflow.chains.length + "\n");
+        post("Total devices found: " + totalDeviceCount + "\n");
+        post("Total chains found: " + totalChainCount + "\n");
 
         var jsonString = JSON.stringify(WorkflowData, null, 2);
         outlet(0, "workflow_json", jsonString);
@@ -490,13 +694,53 @@ function export_workflow_json() {
         post("JSON Export (first 500 chars):\n");
         post(jsonString.substring(0, 500) + "...\n");
 
-        // NEW: Send to n8n server automatically
-        post("\n🚀 SENDING TO AI ANALYSIS SERVER...\n");
-        send_to_n8n_server(WorkflowData);
+        post("✅ Extraction completed successfully!\n");
+
+        // MODULAR: Optional server integration based on configuration
+        if (ExtractorConfig.auto_send_to_server && !ExtractorConfig.offline_mode) {
+            post("� Auto-sending to AI server (configured behavior)...\n");
+            send_to_ai_server();
+        } else {
+            post("💡 To analyze with AI: send_to_ai_server()\n");
+            post("💡 To configure auto-send: set_config('auto_send_to_server', true)\n");
+        }
 
     } catch (error) {
         post("ERROR in export_workflow_json: " + error + "\n");
     }
+}
+
+// Helper function to recursively count devices and chains
+function count_devices_and_chains_recursive(container) {
+    var deviceCount = 0;
+    var chainCount = 0;
+
+    if (container.chains && container.chains.length > 0) {
+        chainCount += container.chains.length;
+
+        for (var i = 0; i < container.chains.length; i++) {
+            var chain = container.chains[i];
+
+            if (chain.devices && chain.devices.length > 0) {
+                deviceCount += chain.devices.length;
+
+                // Recursively count nested devices and chains
+                for (var j = 0; j < chain.devices.length; j++) {
+                    var device = chain.devices[j];
+                    if (device.chains && device.chains.length > 0) {
+                        var nestedCounts = count_devices_and_chains_recursive(device);
+                        deviceCount += nestedCounts.devices;
+                        chainCount += nestedCounts.chains;
+                    }
+                }
+            }
+        }
+    }
+
+    return {
+        devices: deviceCount,
+        chains: chainCount
+    };
 }
 
 /////////////////////////////////////////
@@ -536,18 +780,45 @@ function RecursiveWorkflowAPIDispose(api) {
 }
 
 function WorkflowAPIMenu(type, path) {
-    var api = new LiveAPI();
+    try {
+        var api = new LiveAPI();
 
-    if (api) {
+        if (!api) {
+            post("ERROR: Failed to create LiveAPI object\n");
+            return null;
+        }
+
+        // Test if LiveAPI is actually functional
+        try {
+            var testId = api.id;  // This will fail if LiveAPI isn't working
+        } catch (testError) {
+            post("ERROR: LiveAPI object not functional: " + testError + "\n");
+            return null;
+        }
+
         var id = /^id (\d+)$/.exec(path);
         if (id) {
             api.id = parseInt(id[1]);
         } else {
             api.path = path;
+
+            // Validate that the path is accessible
+            try {
+                var testName = api.get("name");
+                if (testName === undefined) {
+                    post("WARNING: Path may not exist: " + path + "\n");
+                }
+            } catch (pathError) {
+                post("ERROR: Cannot access path " + path + ": " + pathError + "\n");
+                return null;
+            }
         }
         api.wtype = type;
+        return api;
+    } catch (error) {
+        post("ERROR in WorkflowAPIMenu: " + error + "\n");
+        return null;
     }
-    return api;
 }
 
 /////////////////////////////////////////
@@ -602,13 +873,82 @@ function test() {
     post("🎵 Rack Workflow Extractor with AI Integration loaded!\n");
     post("Server: " + N8N_WEBHOOK_URL + "\n");
     post("Commands:\n");
+    post("  test() - Show this message\n");
+    post("  validate_environment() - Check Max for Live setup\n");
     post("  extract_metal_head() - Extract Metal Head device\n");
     post("  extract_ezfreqsplit() - Extract EZFREQSPLIT device\n");
     post("  extract_workflow(trackID, deviceID) - Extract any device\n");
-    post("  test() - Show this message\n");
+    post("  diagnose_tracks() - Show available tracks and devices\n");
+    post("\nServer Commands:\n");
+    post("  send_to_ai_server() - Send last extraction to AI\n");
+    post("  retry_ai_analysis() - Retry failed AI analysis\n");
+    post("  test_n8n_connection() - Test server connectivity\n");
+    post("\nConfiguration:\n");
+    post("  show_config() - Show current settings\n");
+    post("  enable_offline_mode() - Disable server operations\n");
+    post("  enable_auto_analysis() - Auto-send to AI after extraction\n");
     post("\nExamples:\n");
     post("  extract_workflow(1, 0) - Extract device on track 1, slot 0\n");
-    post("\n🔧 All extractions automatically send to AI server!\n");
+    post("  send_to_ai_server() - Analyze with AI (after extraction)\n");
+    post("\n🔧 Modular design: Extraction works offline, AI analysis optional!\n");
+}
+
+// Diagnostic function to check environment
+function validate_environment() {
+    post("🔧 === ENVIRONMENT DIAGNOSTIC ===\n");
+    return validate_max_environment();
+}
+
+// Diagnostic function to show available tracks and devices
+function diagnose_tracks() {
+    post("🔍 === TRACK AND DEVICE DIAGNOSTIC ===\n");
+
+    try {
+        var liveSetAPI = new LiveAPI();
+        liveSetAPI.path = "live_set";
+
+        var trackCount = liveSetAPI.getcount("tracks");
+        post("Found " + trackCount + " tracks:\n");
+
+        for (var i = 0; i < Math.min(trackCount, 10); i++) {  // Limit to first 10 tracks
+            try {
+                var trackAPI = new LiveAPI();
+                trackAPI.path = "live_set tracks " + i;
+                var trackName = trackAPI.get("name") || "Unnamed";
+                var deviceCount = trackAPI.getcount("devices");
+
+                post("  Track " + i + ": '" + trackName + "' (" + deviceCount + " devices)\n");
+
+                // Show first few devices on each track
+                for (var j = 0; j < Math.min(deviceCount, 5); j++) {
+                    try {
+                        var deviceAPI = new LiveAPI();
+                        deviceAPI.path = "live_set tracks " + i + " devices " + j;
+                        var deviceName = deviceAPI.get("name") || "Unnamed";
+                        post("    Device " + j + ": '" + deviceName + "'\n");
+                    } catch (deviceError) {
+                        post("    Device " + j + ": ERROR - " + deviceError + "\n");
+                    }
+                }
+
+                if (deviceCount > 5) {
+                    post("    ... and " + (deviceCount - 5) + " more devices\n");
+                }
+
+            } catch (trackError) {
+                post("  Track " + i + ": ERROR - " + trackError + "\n");
+            }
+        }
+
+        if (trackCount > 10) {
+            post("... and " + (trackCount - 10) + " more tracks\n");
+        }
+
+        post("💡 Use extract_workflow(trackID, deviceID) to extract a specific device\n");
+
+    } catch (error) {
+        post("❌ ERROR in diagnose_tracks: " + error + "\n");
+    }
 }
 
 // Test n8n connection

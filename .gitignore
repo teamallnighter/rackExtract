@@ -31,5 +31,11 @@ Temporary Items
 # iCloud generated files
 *.icloud
 
+###MISC###
 oldVersions/
 research/
+v2.0/
+.vscode/
+.github/
+.gitignore
+server/

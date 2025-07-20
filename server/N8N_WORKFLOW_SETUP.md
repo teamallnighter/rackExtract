@@ -1,7 +1,24 @@
-# Rack Knowledge Base n8n Workflow Setup
+# Rack Knowledge Base n8n Workflow Setup (v2.0 - Modular Pattern Analysis)
 
 ## Overview
-This n8n workflow creates an automated pipeline for analyzing Ableton Live rack data using Anthropic Claude AI and storing the results in Airtable for searchable knowledge base functionality.
+This enhanced n8n workflow creates an automated pipeline for analyzing Ableton Live rack data using Anthropic Claude AI with **advanced modular pattern recognition**. The system now identifies reusable chain patterns, frequency splitting strategies, and multiband processing templates.
+
+## 🧩 **New in v2.0: Modular Pattern Analysis**
+
+### **Enhanced AI Analysis:**
+- **Chain Pattern Recognition**: Identifies frequency splitting, parallel processing, serial chains
+- **Modular Building Blocks**: Detects reusable chain templates
+- **Multiband Potential**: Suggests how patterns could be applied to different processing types  
+- **Chain Substitutions**: Recommends alternative device combinations
+- **Template Extraction**: Creates reusable workflow templates
+
+### **Frequency Splitting Intelligence:**
+```javascript
+// AI now recognizes patterns like:
+"EZFREQSPLIT" → 3-band frequency processor
+"Could become" → Multiband Compressor, Multiband Reverb, etc.
+"Chain template" → Reusable 3-band pattern for any processing
+```
 
 ## Workflow Components
 
@@ -61,17 +78,35 @@ npm install @n8n/n8n-nodes-langchain
 ### 3. Configure Airtable
 - Create new Airtable base called "Rack Knowledge Base"
 - Create table "Rack_Knowledge_Base" with these fields:
+
+#### **Core Fields:**
   - `rack_name` (Single line text)
   - `complexity_score` (Number)
   - `device_count` (Number)
+  - `chain_count` (Number)
   - `user_use_case` (Long text)
   - `ai_refined_use_case` (Long text)
   - `final_tags` (Long text)
+
+#### **AI Analysis Fields:**
   - `ai_workflow_pattern` (Single line text)
   - `ai_musical_function` (Long text)
   - `ai_skill_level` (Single select: beginner, intermediate, advanced, expert)
   - `ai_sonic_characteristics` (Long text)
   - `ai_genre_suitability` (Long text)
+
+#### **NEW: Modular Analysis Fields:**
+  - `modular_chain_patterns` (Long text) - Identified chain patterns
+  - `frequency_split_analysis` (Long text) - JSON analysis of frequency splitting
+  - `reusable_chains` (Long text) - JSON array of reusable chain modules
+  - `multiband_variations` (Long text) - Suggested multiband applications  
+  - `modular_templates` (Long text) - Template names this rack could generate
+  - `chain_substitutions` (Long text) - JSON of alternative device combinations
+  - `modularity_score` (Number) - 1-10 score for modular reusability
+  - `is_modular` (Checkbox) - Whether rack has modular patterns
+  - `modular_tags` (Long text) - Specific modular search tags
+
+#### **Metadata Fields:**
   - `created_at` (Date)
   - `searchable_content` (Long text)
   - `technical_data_json` (Long text)
@@ -133,9 +168,9 @@ To connect your M4L extractor with this workflow:
 2. **Send extracted data**: POST the workflow JSON to your n8n webhook
 3. **Include user context**: Add user input for better AI analysis
 
-## Expected Output
+## Expected Output (Enhanced with Modular Analysis)
 
-The workflow returns:
+The workflow returns comprehensive analysis including modular patterns:
 ```json
 {
   "status": "success",
@@ -143,8 +178,22 @@ The workflow returns:
   "complexity_score": 45,
   "analyzed_use_case": "Three-band frequency splitting for mix bus processing",
   "ai_tags": ["frequency-splitting", "mixing", "eq", "parallel-processing"],
-  "workflow_pattern": "Parallel frequency band processing",
+  "modular_tags": ["frequency-split-template", "3band-processing", "multiband-foundation"],
+  "workflow_pattern": "parallel_frequency_processing",
   "musical_function": "Separates audio into low, mid, and high frequency bands for independent processing",
+  "modular_analysis": {
+    "is_modular": true,
+    "modularity_score": 9,
+    "chain_patterns": ["frequency_split_3band", "eq_per_band"],
+    "multiband_potential": ["multiband_compression", "multiband_saturation", "multiband_reverb"],
+    "reusable_chains": [
+      {
+        "chain_name": "Low Band EQ Chain",
+        "function": "low_frequency_processing", 
+        "reusability_score": 9
+      }
+    ]
+  },
   "knowledge_base_id": "recXXXXXXXXXXXXXX",
   "similar_racks": [
     {"name": "Multiband Comp", "use_case": "Multiband compression"},
