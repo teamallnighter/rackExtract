@@ -1,0 +1,164 @@
+{
+  "name": "Rack Knowledge Base with Anthropic AI",
+  "nodes": [
+    {
+      "id": "webhook-trigger",
+      "name": "Rack Analysis Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        100,
+        400
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "rack-analysis",
+        "options": {
+          "onError": "continueRegularOutput"
+        }
+      }
+    },
+    {
+      "id": "data-validator",
+      "name": "Validate & Enrich Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        300,
+        400
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Validate and enrich the incoming rack data\nconst data = $input.first().json;\n\n// Validation checks\nif (!data.workflow) {\n  throw new Error('Invalid rack data: missing workflow');\n}\n\nif (!data.workflow.root_device && !data.workflow.root_chain) {\n  throw new Error('Invalid rack data: missing root device/chain');\n}\n\n// Calculate technical metrics\nconst devices = data.workflow.devices || [];\nconst chains = data.workflow.chains || [];\nconst rootDevice = data.workflow.root_device || data.workflow.root_chain;\n\n// Extract all parameters for analysis\nconst allParameters = [];\ndevices.forEach(device => {\n  if (device.parameters) {\n    device.parameters.forEach(param => {\n      allParameters.push({\n        device_name: device.name,\n        param_name: param.name,\n        param_value: param.value,\n        display_value: param.display_value\n      });\n    });\n  }\n});\n\n// Add root device parameters (macros)\nif (rootDevice.macros) {\n  rootDevice.macros.forEach(macro => {\n    allParameters.push({\n      device_name: rootDevice.name + ' (Macro)',\n      param_name: macro.name,\n      param_value: macro.value,\n      display_value: macro.display_value\n    });\n  });\n}\n\n// Calculate complexity metrics\nconst totalParams = allParameters.length;\nconst deviceCount = devices.length;\nconst chainCount = chains.length;\nconst maxDepth = Math.max(...chains.map(c => c.depth || 0), 0);\nconst deviceTypes = new Set(devices.map(d => d.type));\n\n// Base complexity calculation\nlet complexityScore = 0;\ncomplexityScore += Math.min(deviceCount * 3, 30);    // Device count (0-30)\ncomplexityScore += Math.min(chainCount * 5, 25);     // Chain complexity (0-25)\ncomplexityScore += Math.min(totalParams * 0.5, 20);  // Parameter complexity (0-20)\ncomplexityScore += Math.min(maxDepth * 5, 15);       // Depth complexity (0-15)\ncomplexityScore += Math.min(deviceTypes.size * 2, 10); // Type diversity (0-10)\ncomplexityScore = Math.min(Math.round(complexityScore), 100);\n\n// Prepare data for AI analysis\nconst enrichedData = {\n  ...data,\n  analysis_context: {\n    device_count: deviceCount,\n    chain_count: chainCount,\n    total_parameters: totalParams,\n    max_depth: maxDepth,\n    complexity_score: complexityScore,\n    device_types: Array.from(deviceTypes),\n    all_parameters: allParameters,\n    root_name: rootDevice.name,\n    has_user_context: data.user_input?.has_user_context || false,\n    timestamp: new Date().toISOString()\n  }\n};\n\nreturn [{ json: enrichedData }];"
+      }
+    },
+    {
+      "id": "anthropic-analyzer",
+      "name": "Anthropic AI Analysis",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        500,
+        400
+      ],
+      "parameters": {
+        "promptType": "define",
+        "text": "You are an expert Ableton Live producer and rack designer. Analyze this rack data and provide comprehensive insights.\n\n# RACK DATA:\n{{ JSON.stringify($json, null, 2) }}\n\n# ANALYSIS REQUIREMENTS:\n\n1. **WORKFLOW PATTERN RECOGNITION**: What type of rack pattern is this? (e.g., parallel processing, serial chain, frequency splitting, creative effects, etc.)\n\n2. **MUSICAL FUNCTION**: What is the primary musical purpose? Be specific about the sonic result.\n\n3. **USE CASE REFINEMENT**: {% if $json.user_input.use_case %}The user says: \"{{ $json.user_input.use_case }}\". Refine this into a clearer, more searchable use case.{% else %}Based on the rack structure, suggest a specific use case.{% endif %}\n\n4. **SEARCHABLE TAGS**: Generate 5-8 specific tags that producers would search for. Include:\n   - Musical function tags (compression, eq, reverb, etc.)\n   - Genre-relevant tags (if applicable)\n   - Workflow tags (bus processing, creative, mixing, etc.)\n   - Difficulty level\n\n5. **SIMILAR RACKS**: What other common rack configurations achieve similar results?\n\n6. **OPTIMIZATION SUGGESTIONS**: How could this rack be improved or simplified?\n\n7. **PARAMETER INSIGHTS**: Which parameters are most critical for the rack's function?\n\n8. **PRODUCER SKILL LEVEL**: What skill level is needed to use this effectively?\n\n# RESPOND IN EXACTLY THIS JSON FORMAT:\n{\n  \"workflow_pattern\": \"string\",\n  \"musical_function\": \"string\",\n  \"refined_use_case\": \"string\",\n  \"searchable_tags\": [\"tag1\", \"tag2\", \"tag3\", \"tag4\", \"tag5\"],\n  \"similar_racks\": [\"description1\", \"description2\"],\n  \"optimization_tips\": [\"tip1\", \"tip2\"],\n  \"critical_parameters\": [\"param1\", \"param2\", \"param3\"],\n  \"skill_level\": \"beginner|intermediate|advanced|expert\",\n  \"sonic_characteristics\": \"string describing the sound\",\n  \"genre_suitability\": [\"genre1\", \"genre2\"],\n  \"production_phase\": \"mixing|creative|sound_design|mastering\"\n}"
+      }
+    },
+    {
+      "id": "anthropic-model",
+      "name": "Anthropic Claude Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [
+        500,
+        500
+      ],
+      "parameters": {
+        "model": {
+          "value": "claude-3-5-sonnet-20241022",
+          "mode": "list",
+          "cachedResultName": "Claude 3.5 Sonnet(20241022)"
+        }
+      },
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-credentials",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "id": "parse-ai-response",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        400
+      ],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Parse and validate AI response\nconst aiResponse = $input.first().json.output;\nconst originalData = $node[\"Validate & Enrich Data\"].json;\n\ntry {\n  // Extract JSON from AI response (might be wrapped in markdown)\n  let jsonStr = aiResponse;\n  \n  // Remove markdown code blocks if present\n  jsonStr = jsonStr.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  \n  // Parse the JSON\n  const aiAnalysis = JSON.parse(jsonStr);\n  \n  // Validate required fields\n  const requiredFields = ['workflow_pattern', 'musical_function', 'refined_use_case', 'searchable_tags'];\n  for (const field of requiredFields) {\n    if (!aiAnalysis[field]) {\n      throw new Error(`Missing required field: ${field}`);\n    }\n  }\n  \n  // Combine all tags (user tags + AI tags)\n  const allTags = [\n    ...(originalData.user_input?.tags || []),\n    ...(aiAnalysis.searchable_tags || [])\n  ];\n  \n  // Remove duplicates and clean tags\n  const uniqueTags = [...new Set(allTags)]\n    .map(tag => tag.toString().toLowerCase().trim())\n    .filter(tag => tag.length > 0 && tag.length < 50);\n  \n  // Create comprehensive knowledge base entry\n  const knowledgeEntry = {\n    // Basic Info\n    rack_name: originalData.analysis_context.root_name,\n    complexity_score: originalData.analysis_context.complexity_score,\n    device_count: originalData.analysis_context.device_count,\n    chain_count: originalData.analysis_context.chain_count,\n    \n    // User Context\n    user_tags: originalData.user_input?.tags || [],\n    user_use_case: originalData.user_input?.use_case || \"\",\n    user_description: originalData.user_input?.description || \"\",\n    user_genre: originalData.user_input?.genre || \"\",\n    user_difficulty: originalData.user_input?.difficulty || \"intermediate\",\n    \n    // AI Analysis\n    ai_workflow_pattern: aiAnalysis.workflow_pattern,\n    ai_musical_function: aiAnalysis.musical_function,\n    ai_refined_use_case: aiAnalysis.refined_use_case,\n    ai_tags: aiAnalysis.searchable_tags || [],\n    ai_similar_racks: aiAnalysis.similar_racks || [],\n    ai_optimization_tips: aiAnalysis.optimization_tips || [],\n    ai_critical_parameters: aiAnalysis.critical_parameters || [],\n    ai_skill_level: aiAnalysis.skill_level || \"intermediate\",\n    ai_sonic_characteristics: aiAnalysis.sonic_characteristics || \"\",\n    ai_genre_suitability: aiAnalysis.genre_suitability || [],\n    ai_production_phase: aiAnalysis.production_phase || \"mixing\",\n    \n    // Combined/Final\n    final_tags: uniqueTags,\n    final_use_case: aiAnalysis.refined_use_case || originalData.user_input?.use_case || aiAnalysis.musical_function,\n    final_skill_level: originalData.user_input?.difficulty || aiAnalysis.skill_level || \"intermediate\",\n    \n    // Technical Data\n    technical_data: {\n      devices: originalData.workflow.devices,\n      chains: originalData.workflow.chains,\n      root_device: originalData.workflow.root_device,\n      all_parameters: originalData.analysis_context.all_parameters\n    },\n    \n    // Metadata\n    created_at: new Date().toISOString(),\n    data_source: \"max4live_extractor_v2\",\n    extractor_version: originalData.metadata?.extractor_version || \"2.0\",\n    has_user_context: originalData.analysis_context.has_user_context,\n    \n    // For search functionality\n    searchable_content: [\n      originalData.analysis_context.root_name,\n      aiAnalysis.refined_use_case,\n      aiAnalysis.musical_function,\n      aiAnalysis.sonic_characteristics,\n      ...uniqueTags,\n      ...(aiAnalysis.similar_racks || []),\n      ...(aiAnalysis.critical_parameters || [])\n    ].join(' ').toLowerCase()\n  };\n  \n  return [{ json: knowledgeEntry }];\n  \n} catch (error) {\n  // Fallback if AI response parsing fails\n  const fallbackEntry = {\n    rack_name: originalData.analysis_context.root_name,\n    complexity_score: originalData.analysis_context.complexity_score,\n    device_count: originalData.analysis_context.device_count,\n    chain_count: originalData.analysis_context.chain_count,\n    user_tags: originalData.user_input?.tags || [],\n    user_use_case: originalData.user_input?.use_case || \"\",\n    ai_analysis_error: error.message,\n    created_at: new Date().toISOString(),\n    final_tags: originalData.user_input?.tags || ['rack', 'ableton'],\n    final_use_case: originalData.user_input?.use_case || \"Audio processing rack\",\n    technical_data: {\n      devices: originalData.workflow.devices,\n      chains: originalData.workflow.chains,\n      root_device: originalData.workflow.root_device\n    },\n    error_occurred: true\n  };\n  \n  return [{ json: fallbackEntry }];\n}"
+      }
+    },
+    {
+      "id": "store-in-airtable",
+      "name": "Store in Knowledge Base",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "authentication": "airtableTokenApi",
+        "resource": "record",
+        "operation": "create",
+        "base": {
+          "value": "YOUR_AIRTABLE_BASE_ID",
+          "mode": "list"
+        },
+        "table": {
+          "value": "Rack_Knowledge_Base",
+          "mode": "list"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "rack_name": "={{ $json.rack_name }}",
+            "complexity_score": "={{ $json.complexity_score }}",
+            "device_count": "={{ $json.device_count }}",
+            "user_use_case": "={{ $json.user_use_case }}",
+            "ai_refined_use_case": "={{ $json.ai_refined_use_case }}",
+            "final_tags": "={{ $json.final_tags.join(', ') }}",
+            "ai_workflow_pattern": "={{ $json.ai_workflow_pattern }}",
+            "ai_musical_function": "={{ $json.ai_musical_function }}",
+            "ai_skill_level": "={{ $json.ai_skill_level }}",
+            "ai_sonic_characteristics": "={{ $json.ai_sonic_characteristics }}",
+            "ai_genre_suitability": "={{ $json.ai_genre_suitability ? $json.ai_genre_suitability.join(', ') : '' }}",
+            "created_at": "={{ $json.created_at }}",
+            "searchable_content": "={{ $json.searchable_content }}",
+            "technical_data_json": "={{ JSON.stringify($json.technical_data) }}",
+            "ai_optimization_tips": "={{ $json.ai_optimization_tips ? $json.ai_optimization_tips.join('\\n') : '' }}",
+            "ai_similar_racks": "={{ $json.ai_similar_racks ? $json.ai_similar_racks.join('\\n') : '' }}",
+            "user_genre": "={{ $json.user_genre }}",
+            "has_user_context": "={{ $json.has_user_context }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        }
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "airtable-credentials",
+          "name": "Airtable API"
+        }
+      }
+    },
+    {
+      "id": "search-similar",
+      "name": "Find Similar Racks",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        500
+      ],
+      "parameters": {
+        "authentication": "airtableTokenApi",
+        "resource": "record",
+        "operation": "search",
+        "base": {
+          "value": "YOUR_AIRTABLE_BASE_ID",
+          "mode": "list"
+        },
+        "table": {
+          "value": "Rack_Knowledge_Base",
+          "mode": "list"
+        },
+        "filterByFormula": "SEARCH('{{ $json.final_tags[0] }}', {final_tags})",
+        "sort": {\n          \"fields\": [{\n            \"field\": \"created_at\",\n            \"direction\": \"desc\"\n          }]\n        },\n        \"maxRecords\": 5\n      },\n      \"credentials\": {\n        \"airtableTokenApi\": {\n          \"id\": \"airtable-credentials\",\n          \"name\": \"Airtable API\"\n        }\n      }\n    },\n    {\n      \"id\": \"final-response\",\n      \"name\": \"Create Response\",\n      \"type\": \"n8n-nodes-base.code\",\n      \"typeVersion\": 2,\n      \"position\": [1100, 400],\n      \"parameters\": {\n        \"language\": \"javaScript\",\n        \"mode\": \"runOnceForAllItems\",\n        \"jsCode\": \"// Create final response for Max for Live\\nconst knowledgeEntry = $input.first().json;\\nconst airtableResponse = $node[\\\"Store in Knowledge Base\\\"].json;\\nconst similarRacks = $node[\\\"Find Similar Racks\\\"].json || [];\\n\\n// Create comprehensive response\\nconst response = {\\n  status: \\\"success\\\",\\n  \\n  // Basic rack info\\n  rack_name: knowledgeEntry.rack_name,\\n  complexity_score: knowledgeEntry.complexity_score,\\n  device_count: knowledgeEntry.device_count,\\n  \\n  // Analysis results\\n  analyzed_use_case: knowledgeEntry.ai_refined_use_case || knowledgeEntry.final_use_case,\\n  ai_tags: knowledgeEntry.final_tags,\\n  workflow_pattern: knowledgeEntry.ai_workflow_pattern,\\n  musical_function: knowledgeEntry.ai_musical_function,\\n  sonic_characteristics: knowledgeEntry.ai_sonic_characteristics,\\n  skill_level: knowledgeEntry.ai_skill_level,\\n  \\n  // Knowledge base info\\n  knowledge_base_id: airtableResponse.id,\\n  processed_at: new Date().toISOString(),\\n  \\n  // Similar racks found\\n  similar_racks: similarRacks.map(rack => ({\\n    name: rack.rack_name,\\n    use_case: rack.ai_refined_use_case,\\n    tags: rack.final_tags\\n  })),\\n  \\n  // User context confirmation\\n  user_context_used: knowledgeEntry.has_user_context,\\n  \\n  // Success message\\n  message: \\\"Rack successfully analyzed and added to knowledge base!\\\",\\n  \\n  // Future search capability\\n  search_tip: \\\"Producers can now search for: '\\\" + knowledgeEntry.final_use_case + \\\"' to find this rack\\\"\\n};\\n\\nreturn [{ json: response }];\"\n      }\n    }\n  ],\n  \"connections\": {\n    \"Rack Analysis Webhook\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Validate & Enrich Data\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Validate & Enrich Data\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Anthropic AI Analysis\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Anthropic AI Analysis\": {\n      \"languageModel\": [\n        [\n          {\n            \"node\": \"Anthropic Claude Model\",\n            \"type\": \"ai_languageModel\",\n            \"index\": 0\n          }\n        ]\n      ],\n      \"main\": [\n        [\n          {\n            \"node\": \"Parse AI Response\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Parse AI Response\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Store in Knowledge Base\",\n            \"type\": \"main\",\n            \"index\": 0\n          },\n          {\n            \"node\": \"Find Similar Racks\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Store in Knowledge Base\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Create Response\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    }\n  },\n  \"settings\": {\n    \"executionOrder\": \"v1\"\n  }\n}"

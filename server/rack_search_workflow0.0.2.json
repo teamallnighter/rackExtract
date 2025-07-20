@@ -1,0 +1,137 @@
+{
+  "name": "Rack Search & Query System",
+  "nodes": [
+    {
+      "id": "search-webhook",
+      "name": "Search Query Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [100, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "search-racks",
+        "options": {
+          "onError": "continueRegularOutput"
+        }
+      }
+    },
+    {
+      "id": "query-analyzer",
+      "name": "Analyze Search Query",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [300, 300],
+      "parameters": {
+        "promptType": "define",
+        "text": "You are a search query analyzer for an Ableton Live rack knowledge base. Your job is to extract search terms and intent from producer queries.\n\n# USER QUERY:\n{{ $json.query }}\n\n# TASK:\nAnalyze this query and extract:\n1. **Keywords** - Important technical and musical terms\n2. **Intent** - What the producer wants to achieve\n3. **Airtable Search Strategy** - How to search the knowledge base\n\n# RESPOND IN EXACTLY THIS JSON FORMAT:\n{\n  \"search_keywords\": [\"keyword1\", \"keyword2\", \"keyword3\"],\n  \"musical_intent\": \"what the producer wants to achieve\",\n  \"search_filters\": {\n    \"tags\": [\"tag1\", \"tag2\"],\n    \"use_case_terms\": [\"term1\", \"term2\"],\n    \"complexity_range\": \"low|medium|high|any\"\n  },\n  \"airtable_formula\": \"SEARCH() formula for Airtable\"\n}\n\n# EXAMPLES:\n- Query: \"how do I tighten my drum bus?\"\n- Response: {\n    \"search_keywords\": [\"drum\", \"bus\", \"tighten\", \"compression\", \"glue\"],\n    \"musical_intent\": \"Make drum elements stick together with tighter, more cohesive sound\",\n    \"search_filters\": {\n      \"tags\": [\"drum\", \"bus\", \"compression\", \"glue\"],\n      \"use_case_terms\": [\"tighten\", \"drum\", \"bus\"],\n      \"complexity_range\": \"any\"\n    },\n    \"airtable_formula\": \"OR(SEARCH('drum', {final_tags}), SEARCH('bus', {final_tags}), SEARCH('compression', {final_tags}), SEARCH('tighten', {searchable_content}))\"\n  }"
+      }
+    },
+    {
+      "id": "search-anthropic-model",
+      "name": "Anthropic Search Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [300, 400],
+      "parameters": {
+        "model": {
+          "value": "claude-3-5-sonnet-20241022",
+          "mode": "list",
+          "cachedResultName": "Claude 3.5 Sonnet(20241022)"
+        }
+      },
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-credentials",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "id": "parse-search-analysis",
+      "name": "Parse Search Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Parse the AI search analysis\nconst aiResponse = $input.first().json.output;\nconst originalQuery = $node[\"Search Query Webhook\"].json.query;\n\ntry {\n  // Clean up AI response and parse JSON\n  let jsonStr = aiResponse.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  const searchAnalysis = JSON.parse(jsonStr);\n  \n  // Fallback formula if AI didn't provide one\n  let airtableFormula = searchAnalysis.airtable_formula;\n  if (!airtableFormula) {\n    const keywords = searchAnalysis.search_keywords || [];\n    const formulas = keywords.map(keyword => \n      `OR(SEARCH('${keyword}', {final_tags}), SEARCH('${keyword}', {searchable_content}))`\n    );\n    airtableFormula = formulas.length > 0 ? `OR(${formulas.join(', ')})` : \"\";\n  }\n  \n  const result = {\n    original_query: originalQuery,\n    search_keywords: searchAnalysis.search_keywords || [],\n    musical_intent: searchAnalysis.musical_intent || \"\",\n    search_filters: searchAnalysis.search_filters || {},\n    airtable_formula: airtableFormula,\n    timestamp: new Date().toISOString()\n  };\n  \n  return [{ json: result }];\n  \n} catch (error) {\n  // Fallback if parsing fails\n  const fallbackResult = {\n    original_query: originalQuery,\n    search_keywords: [originalQuery], // Use the whole query as a keyword\n    musical_intent: \"Find relevant racks\",\n    airtable_formula: `SEARCH('${originalQuery}', {searchable_content})`,\n    error: error.message,\n    timestamp: new Date().toISOString()\n  };\n  \n  return [{ json: fallbackResult }];\n}"
+      }
+    },
+    {
+      "id": "search-knowledge-base",
+      "name": "Search Knowledge Base",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [700, 300],
+      "parameters": {
+        "authentication": "airtableTokenApi",
+        "resource": "record",
+        "operation": "search",
+        "base": {
+          "value": "YOUR_AIRTABLE_BASE_ID",
+          "mode": "list"
+        },
+        "table": {
+          "value": "Rack_Knowledge_Base",
+          "mode": "list"
+        },
+        "filterByFormula": "={{ $json.airtable_formula }}",
+        "sort": {
+          "fields": [{
+            "field": "complexity_score",
+            "direction": "asc"
+          }]
+        },
+        "maxRecords": 10
+      },
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "airtable-credentials",
+          "name": "Airtable API"
+        }
+      }
+    },
+    {
+      "id": "rank-results",
+      "name": "Rank & Format Results",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [900, 300],
+      "parameters": {
+        "promptType": "define",
+        "text": "You are a rack recommendation expert. Rank and present these search results for the user query.\n\n# USER QUERY:\n{{ $node[\"Parse Search Analysis\"].json.original_query }}\n\n# SEARCH INTENT:\n{{ $node[\"Parse Search Analysis\"].json.musical_intent }}\n\n# FOUND RACKS:\n{{ JSON.stringify($json, null, 2) }}\n\n# TASK:\nRank these racks by relevance to the user's query and create a helpful response.\n\n# RESPOND IN EXACTLY THIS JSON FORMAT:\n{\n  \"total_found\": number,\n  \"best_match\": {\n    \"rack_name\": \"string\",\n    \"why_relevant\": \"explanation\",\n    \"use_case\": \"string\",\n    \"complexity\": \"string\",\n    \"tags\": [\"tag1\", \"tag2\"]\n  },\n  \"other_options\": [\n    {\n      \"rack_name\": \"string\",\n      \"use_case\": \"string\",\n      \"why_relevant\": \"explanation\"\n    }\n  ],\n  \"search_tips\": [\"tip1\", \"tip2\"],\n  \"summary\": \"helpful summary for the producer\"\n}"
+      }
+    },
+    {
+      "id": "rank-anthropic-model",
+      "name": "Anthropic Ranking Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.3,
+      "position": [900, 400],
+      "parameters": {
+        "model": {
+          "value": "claude-3-5-sonnet-20241022",
+          "mode": "list",
+          "cachedResultName": "Claude 3.5 Sonnet(20241022)"
+        }
+      },
+      "credentials": {
+        "anthropicApi": {
+          "id": "anthropic-credentials",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "id": "create-search-response",
+      "name": "Create Search Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1100, 300],
+      "parameters": {
+        "language": "javaScript",
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Create final search response\nconst rankingResponse = $input.first().json.output;\nconst originalQuery = $node[\"Parse Search Analysis\"].json.original_query;\nconst searchIntent = $node[\"Parse Search Analysis\"].json.musical_intent;\nconst rawResults = $node[\"Search Knowledge Base\"].json;\n\ntry {\n  // Parse AI ranking response\n  let jsonStr = rankingResponse.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  const ranking = JSON.parse(jsonStr);\n  \n  // Create comprehensive search response\n  const searchResponse = {\n    status: \"success\",\n    query: originalQuery,\n    intent: searchIntent,\n    \n    // Results summary\n    total_found: rawResults.length,\n    results_returned: Math.min(rawResults.length, 10),\n    \n    // Best match\n    best_match: ranking.best_match || null,\n    \n    // Other options\n    other_options: ranking.other_options || [],\n    \n    // All raw results for reference\n    all_results: rawResults.map(rack => ({\n      id: rack.id,\n      rack_name: rack.rack_name,\n      use_case: rack.ai_refined_use_case,\n      tags: rack.final_tags ? rack.final_tags.split(', ') : [],\n      complexity_score: rack.complexity_score,\n      skill_level: rack.ai_skill_level,\n      created_at: rack.created_at\n    })),\n    \n    // Search metadata\n    search_tips: ranking.search_tips || [],\n    summary: ranking.summary || \"Found matching racks for your query\",\n    \n    // Timestamps\n    searched_at: new Date().toISOString(),\n    \n    // Help text\n    help: {\n      no_results: \"Try broader terms like 'compression', 'reverb', or 'eq'\",\n      improve_search: \"Use specific terms like 'drum bus compression' or 'vocal reverb'\",\n      contribute: \"Add your own racks to help other producers!\"\n    }\n  };\n  \n  return [{ json: searchResponse }];\n  \n} catch (error) {\n  // Fallback response\n  const fallbackResponse = {\n    status: \"success\",\n    query: originalQuery,\n    total_found: rawResults.length,\n    results: rawResults.map(rack => ({\n      rack_name: rack.rack_name,\n      use_case: rack.ai_refined_use_case,\n      tags: rack.final_tags ? rack.final_tags.split(', ') : []\n    })),\n    error: \"Could not rank results, showing raw matches\",\n    searched_at: new Date().toISOString()\n  };\n  \n  return [{ json: fallbackResponse }];\n}"
+      }
+    }\n  ],\n  \"connections\": {\n    \"Search Query Webhook\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Analyze Search Query\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Analyze Search Query\": {\n      \"languageModel\": [\n        [\n          {\n            \"node\": \"Anthropic Search Model\",\n            \"type\": \"ai_languageModel\",\n            \"index\": 0\n          }\n        ]\n      ],\n      \"main\": [\n        [\n          {\n            \"node\": \"Parse Search Analysis\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Parse Search Analysis\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Search Knowledge Base\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Search Knowledge Base\": {\n      \"main\": [\n        [\n          {\n            \"node\": \"Rank & Format Results\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    },\n    \"Rank & Format Results\": {\n      \"languageModel\": [\n        [\n          {\n            \"node\": \"Anthropic Ranking Model\",\n            \"type\": \"ai_languageModel\",\n            \"index\": 0\n          }\n        ]\n      ],\n      \"main\": [\n        [\n          {\n            \"node\": \"Create Search Response\",\n            \"type\": \"main\",\n            \"index\": 0\n          }\n        ]\n      ]\n    }\n  },\n  \"settings\": {\n    \"executionOrder\": \"v1\"\n  }\n}"

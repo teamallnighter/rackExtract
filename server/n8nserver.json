@@ -1,0 +1,104 @@
+{
+    "name": "Rack Data Processing Server",
+    "nodes": [
+        {
+            "parameters": {
+                "httpMethod": "POST",
+                "path": "rack-data",
+                "responseMode": "onReceived"
+            },
+            "id": "webhook-1",
+            "name": "Rack Data Webhook",
+            "type": "n8n-nodes-base.webhook",
+            "typeVersion": 2.1,
+            "position": [
+                300,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "language": "javaScript",
+                "mode": "runOnceForAllItems",
+                "jsCode": "// Validate and clean rack data from Max for Live\nconst rackData = $input.first().json;\n\n// Helper function to clean 5e-324 corrupted values\nfunction cleanData(obj) {\n  if (!obj || typeof obj !== 'object') return obj;\n  \n  if (Array.isArray(obj)) {\n    return obj.map(item => cleanData(item)).filter(item => item !== null);\n  }\n  \n  const cleaned = {};\n  for (const [key, value] of Object.entries(obj)) {\n    // Skip 5e-324 corrupted values\n    if (value === 5e-324 || String(value).includes('5e-324')) {\n      continue;\n    }\n    \n    if (typeof value === 'object' && value !== null) {\n      cleaned[key] = cleanData(value);\n    } else {\n      cleaned[key] = value;\n    }\n  }\n  return cleaned;\n}\n\n// Clean the incoming data\nconst cleanedData = cleanData(rackData);\n\n// Extract key metrics\nconst deviceCount = cleanedData.workflow?.devices?.length || 0;\nconst chainCount = cleanedData.workflow?.chains?.length || 0;\nconst totalParameters = cleanedData.workflow?.devices?.reduce((sum, device) => {\n  return sum + (device.parameters?.length || 0);\n}, 0) || 0;\n\n// Calculate complexity score (simple algorithm)\nlet complexityScore = 0;\nif (deviceCount > 0) {\n  complexityScore = Math.min(100, (deviceCount * 10) + (chainCount * 5) + (totalParameters * 0.5));\n}\n\n// Extract rack name\nconst rackName = cleanedData.workflow?.root_device?.name || \n                cleanedData.workflow?.root_chain?.name || \n                `Rack_${Date.now()}`;\n\n// Prepare validated output\nconst validatedOutput = {\n  original_data: cleanedData,\n  rack_name: rackName,\n  device_count: deviceCount,\n  chain_count: chainCount,\n  total_parameters: totalParameters,\n  complexity_score: Math.round(complexityScore),\n  source_track_id: cleanedData.metadata?.track_id || null,\n  device_id: cleanedData.metadata?.device_id || null,\n  extracted_at: cleanedData.metadata?.extracted_at || new Date().toISOString(),\n  validation_status: 'success',\n  validation_timestamp: new Date().toISOString()\n};\n\nreturn [{ json: validatedOutput }];"
+            },
+            "id": "code-1",
+            "name": "Validate & Clean JSON",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                520,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "language": "javaScript",
+                "mode": "runOnceForAllItems",
+                "jsCode": "// AI-powered analysis of rack workflow\nconst data = $input.first().json;\nconst workflow = data.original_data.workflow;\n\n// Device type analysis\nfunction analyzeDeviceTypes(devices) {\n  const types = {\n    effects: [],\n    instruments: [],\n    racks: [],\n    utilities: []\n  };\n  \n  if (!devices) return types;\n  \n  devices.forEach(device => {\n    const name = device.name?.toLowerCase() || '';\n    \n    // Categorize by common device patterns\n    if (name.includes('reverb') || name.includes('delay') || name.includes('chorus') || \n        name.includes('compressor') || name.includes('eq') || name.includes('filter')) {\n      types.effects.push(device.name);\n    } else if (name.includes('synth') || name.includes('bass') || name.includes('lead') ||\n               name.includes('pad') || name.includes('drum')) {\n      types.instruments.push(device.name);\n    } else if (device.type === 'rack' || name.includes('rack')) {\n      types.racks.push(device.name);\n    } else {\n      types.utilities.push(device.name);\n    }\n  });\n  \n  return types;\n}\n\n// Use case detection\nfunction detectUseCase(devices, rackName) {\n  const deviceNames = devices?.map(d => d.name?.toLowerCase() || '').join(' ') || '';\n  const rackNameLower = rackName.toLowerCase();\n  \n  if (rackNameLower.includes('bass') || deviceNames.includes('bass')) {\n    return { primary: 'bass-foundation', confidence: 0.8 };\n  }\n  if (rackNameLower.includes('lead') || deviceNames.includes('lead')) {\n    return { primary: 'lead-melody', confidence: 0.8 };\n  }\n  if (rackNameLower.includes('pad') || deviceNames.includes('pad')) {\n    return { primary: 'ambient-texture', confidence: 0.7 };\n  }\n  if (deviceNames.includes('drum') || deviceNames.includes('perc')) {\n    return { primary: 'percussion', confidence: 0.9 };\n  }\n  \n  return { primary: 'general-processing', confidence: 0.5 };\n}\n\n// Generate tags\nfunction generateTags(devices, useCase, complexity) {\n  const tags = [];\n  const deviceNames = devices?.map(d => d.name?.toLowerCase() || '').join(' ') || '';\n  \n  // Complexity tags\n  if (complexity > 70) {\n    tags.push({ name: 'complex', type: 'complexity', confidence: 0.8 });\n  } else if (complexity < 30) {\n    tags.push({ name: 'simple', type: 'complexity', confidence: 0.8 });\n  } else {\n    tags.push({ name: 'moderate', type: 'complexity', confidence: 0.7 });\n  }\n  \n  // Use case tag\n  tags.push({ name: useCase.primary, type: 'use_case', confidence: useCase.confidence });\n  \n  return tags;\n}\n\n// Perform analysis\nconst deviceTypes = analyzeDeviceTypes(workflow?.devices);\nconst useCase = detectUseCase(workflow?.devices, data.rack_name);\nconst tags = generateTags(workflow?.devices, useCase, data.complexity_score);\n\n// Create summary\nconst deviceList = workflow?.devices?.map(d => d.name).join(', ') || 'No devices';\nconst summary = `${data.rack_name}: ${useCase.primary} rack with ${data.device_count} devices (${deviceList}). Complexity: ${data.complexity_score}/100.`;\n\n// Enhanced output with AI analysis\nconst analysisOutput = {\n  ...data,\n  ai_analysis: {\n    device_types: deviceTypes,\n    primary_use_case: useCase.primary,\n    use_case_confidence: useCase.confidence,\n    generated_tags: tags,\n    summary_text: summary,\n    analysis_timestamp: new Date().toISOString()\n  }\n};\n\nreturn [{ json: analysisOutput }];"
+            },
+            "id": "code-2",
+            "name": "AI Workflow Analysis",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                740,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "respondWith": "json",
+                "responseBody": "={\n  \"status\": \"success\",\n  \"message\": \"Rack workflow processed successfully\",\n  \"rack_name\": \"{{ $json.rack_name }}\",\n  \"device_count\": {{ $json.device_count }},\n  \"complexity_score\": {{ $json.complexity_score }},\n  \"primary_use_case\": \"{{ $json.ai_analysis.primary_use_case }}\",\n  \"tags\": {{ JSON.stringify($json.ai_analysis.generated_tags.map(t => t.name)) }},\n  \"processed_at\": \"{{ $now.toISOString() }}\"\n}"
+            },
+            "id": "respond-1",
+            "name": "Success Response",
+            "type": "n8n-nodes-base.respondToWebhook",
+            "typeVersion": 1.5,
+            "position": [
+                960,
+                300
+            ]
+        }
+    ],
+    "connections": {
+        "Rack Data Webhook": {
+            "main": [
+                [
+                    {
+                        "node": "Validate & Clean JSON",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Validate & Clean JSON": {
+            "main": [
+                [
+                    {
+                        "node": "AI Workflow Analysis",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "AI Workflow Analysis": {
+            "main": [
+                [
+                    {
+                        "node": "Success Response",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {
+        "executionOrder": "v1"
+    },
+    "pinData": {},
+    "versionId": "00000000-0000-0000-0000-000000000000"
+}
