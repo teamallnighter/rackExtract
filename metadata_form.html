@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rack Metadata Form</title>
+    <script src="https://kit.fontawesome.com/05a8f14e1c.js" crossorigin="anonymous"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            backdrop-filter: blur(10px);
+        }
+
+        h1 {
+            text-align: center;
+            color: #4a5568;
+            margin-bottom: 15px;
+            font-size: 28px;
+            font-weight: 300;
+        }
+
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2d3748;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input[type="text"], 
+        textarea, 
+        select {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        input[type="text"]:focus, 
+        textarea:focus, 
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .tags-input {
+            position: relative;
+        }
+
+        .tags-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+            min-height: 40px;
+            padding: 8px;
+            border: 2px dashed #e2e8f0;
+            border-radius: 8px;
+            background: #f7fafc;
+        }
+
+        .tag {
+            background: #667eea;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .tag-remove {
+            background: rgba(255, 255, 255, 0.3);
+            border: none;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            font-size: 12px;
+            color: white;
+        }
+
+        .preset-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-bottom: 25px;
+        }
+
+        .preset-btn {
+            padding: 12px 20px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .preset-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .preset-btn.mastering {
+            border-color: #38b2ac;
+            color: #38b2ac;
+        }
+
+        .preset-btn.mastering:hover {
+            background: #38b2ac;
+            color: white;
+        }
+
+        .preset-btn.creative {
+            border-color: #ed8936;
+            color: #ed8936;
+        }
+
+        .preset-btn.creative:hover {
+            background: #ed8936;
+            color: white;
+        }
+
+        .preset-btn.mixing {
+            border-color: #9f7aea;
+            color: #9f7aea;
+        }
+        .header{ 
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            align-items: space-around;
+            margin-bottom: 15px;
+        }
+        .preset-btn.mixing:hover {
+            background: #9f7aea;
+            color: white;
+        }
+
+        .action-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 12px;
+            margin-top: 25px;
+        }
+
+        .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            font-size: 14px;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5a67d8;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+
+        .btn-secondary:hover {
+            background: #cbd5e0;
+        }
+
+        .btn-danger {
+            background: #f56565;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #e53e3e;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: 600;
+            text-align: center;
+            display: none;
+        }
+
+        .status.success {
+            background: #c6f6d5;
+            color: #2f855a;
+            border: 1px solid #9ae6b4;
+        }
+
+        .status.error {
+            background: #fed7d7;
+            color: #c53030;
+            border: 1px solid #fbb6ce;
+        }
+
+        .extraction-section {
+            border-top: 2px solid #e2e8f0;
+            margin-top: 30px;
+            padding-top: 25px;
+        }
+
+        .extract-form {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto;
+            gap: 12px;
+            align-items: end;
+        }
+
+        .extract-input {
+            padding: 10px 14px;
+            border: 2px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .btn-extract {
+            background: #48bb78;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .btn-extract:hover {
+            background: #38a169;
+            transform: translateY(-1px);
+        }
+
+        .selections {
+            display: flex;
+            flex-direction: row;
+            justify-content: space-evenly;
+        }
+
+        /* Chrome, Safari, Edge, Opera */
+input::-webkit-outer-spin-button,
+input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Firefox */
+input[type=number] {
+  -moz-appearance: textfield;
+}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>RackExtract</h1>
+            <h3>Ableton Live Work Flow Extractor</h3>
+                  
+        </div>
+
+        <!-- Preset Buttons -->
+        <div class="preset-buttons">
+            <button class="preset-btn mastering" onclick="applyPreset('mastering')">
+                🎛️ Mastering
+            </button>
+            <button class="preset-btn creative" onclick="applyPreset('creative')">
+                🎨 Creative FX
+            </button>
+            <button class="preset-btn mixing" onclick="applyPreset('mixing')">
+                🎚️ Mixing
+            </button>
+        </div>
+
+        <!-- Metadata Form -->
+        <form id="metadataForm">
+            <div class="form-group">
+                <label for="useCase">Use Case</label>
+                <textarea id="usecase" placeholder="Describe what this rack does... Be as descriptive as possible"></textarea>
+            </div>
+
+            <!--<div class="form-group">
+                <label for="description">Description</label>
+                <textarea id="description" placeholder="Describe what this rack does..."></textarea>
+            </div>-->
+<section class="selections">
+            <div class="form-group">
+                <label for="category">Category</label>
+                <select id="category">
+                    <option value="">Select category...</option>
+                    <option value="dynamics">Dynamics</option>
+                    <option value="spatial">Spatial</option>
+                    <option value="modulation">Modulation</option>
+                    <option value="filtering">Filtering</option>
+                    <option value="distortion">Distortion</option>
+                    <option value="utility">Utility</option>
+                    <option value="creative">Creative</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="difficulty">Difficulty</label>
+                <select id="difficulty">
+                    <option value="">Select difficulty...</option>
+                    <option value="beginner">Beginner</option>
+                    <option value="intermediate">Intermediate</option>
+                    <option value="advanced">Advanced</option>
+                </select>
+            </div>
+</section>
+           <!-- <div class="form-group">
+                <label for="genre">Genre</label>
+                <input type="text" id="genre" placeholder="e.g., electronic, rock, jazz">
+            </div> -->
+
+            <div class="form-group tags-input">
+                <label for="tagInput">Tags</label>
+                <input type="text" id="tagInput" placeholder="Type a tag and press Enter..." onkeypress="handleTagInput(event)">
+                <div class="tags-container" id="tagsContainer"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="notes">Notes</label>
+                <textarea id="notes" placeholder="Additional notes about this rack..."></textarea>
+            </div>
+        </form>
+
+        <!-- Action Buttons -->
+        <div class="action-buttons">
+            <button class="btn btn-primary" onclick="saveMetadata()">💾 Save Metadata</button>
+            <button class="btn btn-secondary" onclick="loadMetadata()">📂 Load Current</button>
+            <button class="btn btn-danger" onclick="clearForm()">🗑️ Clear All</button>
+        </div>
+
+        <!-- Extraction Section -->
+        <div class="extraction-section">
+            <h3>Extract with Metadata</h3>
+            
+            <!-- Live Path Input -->
+            <div class="form-group">
+                <label for="livePath">Live Path (Right-click rack → Copy Live Path)</label>
+                <input type="text" id="livePath" placeholder="e.g., live_set tracks 4 devices 0" onpaste="handleLivePathPaste(event)" oninput="parseLivePath()">
+                <small style="color: #666; font-size: 12px;">Paste the Live path here and track/device IDs will be filled automatically</small>
+            </div>
+            
+            <!-- Manual Input (fallback) -->
+            <div class="extract-form">
+                <input type="number" id="trackId" placeholder="Track ID" class="extract-input" min="0" readonly>
+                <input type="number" id="deviceId" placeholder="Device ID" class="extract-input" min="0" readonly>
+                <button type="button" class="btn-extract" onclick="extractWithMetadata()">🎯 Extract</button>
+            </div>
+            <p style="font-size: 12px; color: #666; margin-top: 8px;">
+                💡 <strong>Quick method:</strong> Right-click rack → "Copy Live Path" → paste above<br>
+                📝 <strong>Manual method:</strong> Enter Track ID and Device ID directly
+            </p>
+        </div>
+
+        <!-- Status Messages -->
+        <div id="status" class="status"></div>
+    </div>
+
+    <script>
+        let tags = [];
+
+        // Check if running in Max
+        if (window.max) {
+            console.log("Metadata form loaded in Max jweb object");
+            
+            // Bind inlets to receive data from Max
+            window.max.bindInlet("metadata_update", (metadataJson) => {
+                try {
+                    const metadata = JSON.parse(metadataJson);
+                    populateForm(metadata);
+                } catch (e) {
+                    console.error("Error parsing metadata:", e);
+                }
+            });
+
+            window.max.bindInlet("extraction_complete", (success) => {
+                if (success) {
+                    showStatus("Extraction completed successfully!", "success");
+                } else {
+                    showStatus("Extraction failed. Check Max console.", "error");
+                }
+            });
+        }
+
+        function applyPreset(type) {
+            switch(type) {
+                case 'mastering':
+                    document.getElementById('usecase').value = 'Professional mastering chain for final polish and loudness optimization';
+                    document.getElementById('category').value = 'dynamics';
+                    document.getElementById('difficulty').value = 'intermediate';
+                    tags = ['mastering', 'finalizer', 'loudness'];
+                    break;
+                case 'creative':
+                    document.getElementById('usecase').value = 'Creative effects chain for experimental sound design and artistic processing';
+                    document.getElementById('category').value = 'modulation';
+                    document.getElementById('difficulty').value = 'advanced';
+                    tags = ['creative', 'experimental', 'fx'];
+                    break;
+                case 'mixing':
+                    document.getElementById('usecase').value = 'Essential mixing tools for level balancing and tone shaping';
+                    document.getElementById('category').value = 'utility';
+                    document.getElementById('difficulty').value = 'beginner';
+                    tags = ['mixing', 'utility', 'workflow'];
+                    break;
+            }
+            updateTagsDisplay();
+            showStatus(`${type.charAt(0).toUpperCase() + type.slice(1)} preset applied!`, "success");
+        }
+
+        function handleTagInput(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                const input = event.target;
+                const tag = input.value.trim().toLowerCase();
+                
+                if (tag && !tags.includes(tag)) {
+                    tags.push(tag);
+                    updateTagsDisplay();
+                    input.value = '';
+                }
+            }
+        }
+
+        function removeTag(tag) {
+            tags = tags.filter(t => t !== tag);
+            updateTagsDisplay();
+        }
+
+        function updateTagsDisplay() {
+            const container = document.getElementById('tagsContainer');
+            container.innerHTML = tags.map(tag => 
+                `<span class="tag">
+                    ${tag}
+                    <button type="button" class="tag-remove" onclick="removeTag('${tag}')">×</button>
+                </span>`
+            ).join('');
+        }
+
+        function saveMetadata() {
+            const metadata = {
+                use_case: document.getElementById('usecase').value,
+                category: document.getElementById('category').value,
+                difficulty: document.getElementById('difficulty').value,
+                tags: tags,
+                notes: document.getElementById('notes').value
+            };
+
+            if (window.max) {
+                // Send metadata to Max
+                window.max.outlet('save_metadata', JSON.stringify(metadata));
+                showStatus("Metadata saved to Max!", "success");
+            } else {
+                console.log("Metadata would be saved:", metadata);
+                showStatus("Metadata saved (demo mode)", "success");
+            }
+        }
+
+        function loadMetadata() {
+            if (window.max) {
+                window.max.outlet('load_metadata');
+                showStatus("Loading current metadata...", "success");
+            } else {
+                // Demo data for testing outside Max
+                const demoMetadata = {
+                    use_case: "Professional mastering chain for final polish and loudness optimization",
+                    category: "dynamics",
+                    difficulty: "intermediate",
+                    tags: ["demo", "test", "multiband"],
+                    notes: "This is demo data"
+                };
+                populateForm(demoMetadata);
+                showStatus("Demo metadata loaded", "success");
+            }
+        }
+
+        function populateForm(metadata) {
+            document.getElementById('usecase').value = metadata.use_case || '';
+            document.getElementById('category').value = metadata.category || '';
+            document.getElementById('difficulty').value = metadata.difficulty || '';
+            document.getElementById('notes').value = metadata.notes || '';
+            tags = metadata.tags || [];
+            updateTagsDisplay();
+        }
+
+        function clearForm() {
+            document.getElementById('metadataForm').reset();
+            tags = [];
+            updateTagsDisplay();
+            showStatus("Form cleared", "success");
+        }
+
+        function extractWithMetadata() {
+            const trackId = document.getElementById('trackId').value;
+            const deviceId = document.getElementById('deviceId').value;
+
+            if (!trackId || !deviceId) {
+                showStatus("Please enter both Track ID and Device ID, or paste a Live path", "error");
+                return;
+            }
+
+            // Save metadata first
+            saveMetadata();
+
+            // Then trigger extraction
+            if (window.max) {
+                window.max.outlet('extract_with_metadata', parseInt(trackId), parseInt(deviceId));
+                showStatus(`Extracting track ${trackId}, device ${deviceId}...`, "success");
+            } else {
+                showStatus(`Would extract track ${trackId}, device ${deviceId} (demo mode)`, "success");
+            }
+        }
+
+        function handleLivePathPaste(event) {
+            // Small delay to allow paste to complete
+            setTimeout(() => {
+                parseLivePath();
+            }, 10);
+        }
+
+        function parseLivePath() {
+            const livePathInput = document.getElementById('livePath');
+            const livePath = livePathInput.value.trim();
+            
+            if (!livePath) {
+                return;
+            }
+
+            // Parse "live_set tracks 4 devices 0" format
+            const trackMatch = livePath.match(/tracks\s+(\d+)/);
+            const deviceMatch = livePath.match(/devices\s+(\d+)/);
+
+            if (trackMatch && deviceMatch) {
+                const trackId = trackMatch[1];
+                const deviceId = deviceMatch[1];
+                
+                document.getElementById('trackId').value = trackId;
+                document.getElementById('deviceId').value = deviceId;
+                
+                showStatus(`✅ Parsed: Track ${trackId}, Device ${deviceId}`, "success");
+                
+                // Add visual feedback
+                livePathInput.style.borderColor = '#48bb78';
+                setTimeout(() => {
+                    livePathInput.style.borderColor = '#e2e8f0';
+                }, 2000);
+            } else {
+                // Show error for invalid format
+                showStatus("⚠️ Invalid Live path format. Expected: 'live_set tracks X devices Y'", "error");
+                livePathInput.style.borderColor = '#f56565';
+                setTimeout(() => {
+                    livePathInput.style.borderColor = '#e2e8f0';
+                }, 2000);
+            }
+        }
+
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${type}`;
+            status.style.display = 'block';
+            
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 3000);
+        }
+
+        // Initialize
+        updateTagsDisplay();
+    </script>
+</body>
+</html>
